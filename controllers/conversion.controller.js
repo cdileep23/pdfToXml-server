@@ -82,19 +82,12 @@ async function processTextWithOpenRouter(text, apiKey, promptType = "initial") {
         // Extract and clean the XML content
         const rawContent = data.choices?.[0]?.message?.content;
         if (!rawContent) throw new Error("No content in response");
-
+        console.log(rawContent)
         // Clean and validate the XML
-        const cleanedXml = cleanXmlResponse(rawContent);
-        
-        // Optional: Validate XML structure
-        try {
-            validateXmlStructure(cleanedXml);
-        } catch (err) {
-            console.warn("XML validation warning:", err.message);
-        }
+       
 
         return {
-            xml: cleanedXml,
+            xml: rawContent,
             metadata: {
                 model: data.model,
                 usage: data.usage,

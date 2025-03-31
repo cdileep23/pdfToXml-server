@@ -7,36 +7,47 @@ import { conversionModel } from '../models/conversion.model.js';
 import UserModel from '../models/user.model.js';
 const { getDocument } = pkg;
 
-// Load environment variables
 dotenv.config();
+
+function cleanXmlString(xmlString) {
+    if (!xmlString) return '';
+    
+    // Remove all text before <?xml
+    const xmlStart = xmlString.indexOf('<?xml');
+    if (xmlStart < 0) return xmlString;
+    
+    let cleaned = xmlString.slice(xmlStart);
+    
+    // Remove any trailing text after the root element closes
+    const rootClose = cleaned.lastIndexOf('</');
+    if (rootClose > 0) {
+        const endTag = cleaned.slice(rootClose).match(/<\/[^>]+>/);
+        if (endTag) {
+            const fullClose = rootClose + endTag[0].length;
+            cleaned = cleaned.substring(0, fullClose);
+        }
+    }
+    
+    return cleaned;
+}
 
 const parsePdfFromUrl = async (url) => {
     try {
-        // Fetch the PDF
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Failed to fetch PDF: ${response.statusText}`);
 
         const pdfBytes = await response.arrayBuffer();
-
-        // Load the PDF document
-        const pdf = await getDocument({
-            data: pdfBytes,
-            // password: 'your-password', // (Uncomment if PDF is password-protected)
-        }).promise;
-
+        const pdf = await getDocument({ data: pdfBytes }).promise;
         let fullText = '';
 
-        // Extract text from each page
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
             fullText += `Page ${i}: ${pageText}\n\n`;
         }
-        const noOfPages = pdf.numPages;
-
-        console.log(fullText); // Log the extracted text
-        return { fullText, noOfPages };
+        
+        return { fullText, noOfPages: pdf.numPages };
     } catch (error) {
         console.error('Error parsing PDF:', error.message);
         throw error;
@@ -45,15 +56,10 @@ const parsePdfFromUrl = async (url) => {
 
 async function processTextWithOpenRouter(text, apiKey, promptType = "initial") {
     const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-    
-    // Define different prompts based on processing stage
-    let prompt;
-    if (promptType === "initial") {
-        prompt = `Convert this to clean, well-formatted XML:\n${text}`;
-    } else if (promptType === "refine") {
-        prompt = `remove content without any tag and give only xml code as response nothing else:\n\n${text}`;
-    }
-    
+    let prompt = promptType === "initial" 
+        ? `Convert this to clean, well-formatted XML for full content:\n${text}`
+        : `Provide only the raw XML without any additional text:\n\n${text}`;
+
     try {
         const response = await fetch(OPENROUTER_API_URL, {
             method: "POST",
@@ -64,87 +70,31 @@ async function processTextWithOpenRouter(text, apiKey, promptType = "initial") {
             },
             body: JSON.stringify({
                 model: "deepseek/deepseek-r1:free",
-                messages: [{
-                    role: "user",
-                    content: prompt
-                }],
-                temperature: 0.3, // Lower for more consistent XML output
+                messages: [{ role: "user", content: prompt }],
+                temperature: 0.3,
             }),
         });
 
-        // Handle response stream properly
         const data = await response.json();
+        if (!response.ok) throw new Error(data.error?.message || 'API request failed');
+        if (!data.choices?.[0]?.message?.content) throw new Error("No content in response");
         
-        if (!response.ok) {
-            throw new Error(data.error?.message || 'API request failed');
-        }
-
-        // Extract and clean the XML content
-        const rawContent = data.choices?.[0]?.message?.content;
-        if (!rawContent) throw new Error("No content in response");
-        console.log(rawContent)
-        // Clean and validate the XML
-       
-
         return {
-            xml: rawContent,
+            xml: cleanXmlString(data.choices[0].message.content),
             metadata: {
                 model: data.model,
                 usage: data.usage,
-                finish_reason: data.choices?.[0]?.finish_reason
+                finish_reason: data.choices[0].finish_reason
             }
         };
-
     } catch (error) {
         console.error("OpenRouter processing error:", error);
         throw new Error(`XML processing failed: ${error.message}`);
     }
 }
 
-// Helper function to clean XML output
-function cleanXmlResponse(xmlString) {
-    // Remove markdown code blocks if present
-    let cleaned = xmlString.replace(/```xml/g, '').replace(/```/g, '').trim();
-    
-    // Fix common XML issues
-    cleaned = cleaned
-        // Fix unclosed tags
-        .replace(/<([a-z_]+)([^>]*)>(?!.*<\/\1>)/g, '<$1$2></$1>')
-        // Remove XML declaration if present (optional)
-        .replace(/<\?xml[^>]+\?>/, '')
-        // Normalize whitespace
-        .replace(/\s+/g, ' ')
-        .replace(/>\s+</g, '><');
-
-    return cleaned;
-}
-
-// Helper function for basic XML validation
-function validateXmlStructure(xmlString) {
-    // Check for balanced tags
-    const tagRegex = /<(\/?)([a-zA-Z][a-zA-Z0-9_-]*)([^>]*)>/g;
-    const stack = [];
-    let match;
-    
-    while ((match = tagRegex.exec(xmlString)) !== null) {
-        const [fullMatch, isClosing, tagName] = match;
-        if (!isClosing) {
-            stack.push(tagName);
-        } else {
-            if (stack.length === 0 || stack.pop() !== tagName) {
-                throw new Error(`Mismatched XML tags: ${tagName}`);
-            }
-        }
-    }
-    
-    if (stack.length > 0) {
-        throw new Error(`Unclosed XML tags: ${stack.join(', ')}`);
-    }
-}
-
-// AWS S3 client setup
 const s3Client = new S3Client({
-    region: process.env.AWS_REGION || 'us-east-1', // Fallback region
+    region: process.env.AWS_REGION || 'us-east-1',
     credentials: {
         accessKeyId: process.env.AWS_ACCESS_KEY_ID,
         secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
@@ -153,64 +103,38 @@ const s3Client = new S3Client({
 
 export const createConversion = async (req, res) => {
     try {
-
-
-        const userId=req.id;
-        const userExists=await UserModel.findById(userId);
-        if(!userExists){
-            res.status(400).json({
-                success:false,
-                message:"User Not Found"
-            })
-        }
-
-        if (!req.files?.pdfFile) {
-            return res.status(400).json({ error: 'No file uploaded' });
-        }
+        const userId = req.id;
+        const userExists = await UserModel.findById(userId);
+        if (!userExists) return res.status(400).json({ success: false, message: "User Not Found" });
+        if (!req.files?.pdfFile) return res.status(400).json({ error: 'No file uploaded' });
 
         const pdfFile = req.files.pdfFile;
-
-        // Validate PDF
         if (!pdfFile.mimetype.includes('pdf')) {
             return res.status(400).json({ error: 'Only PDF files are allowed' });
         }
 
-        // Sanitize filename
         const sanitizedName = pdfFile.name.replace(/[^a-zA-Z0-9._-]/g, '-');
-
         const fileName = `conversions/${uuidv4()}-${sanitizedName}`;
     
-        const uploadParams = {
+        await s3Client.send(new PutObjectCommand({
             Bucket: process.env.S3_BUCKET_NAME,
             Key: fileName,
             Body: pdfFile.data,
             ContentType: 'application/pdf',
             ACL: 'public-read'
-        };
+        }));
 
-        console.log('Uploading to S3...');
-        const uploadResponse = await s3Client.send(new PutObjectCommand(uploadParams));
-
-        // Generate public URL
         const publicUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
-        
-        // Parse the PDF to extract text
         const { fullText, noOfPages } = await parsePdfFromUrl(publicUrl);
-        console.log("Parsed Text");
-        
-        // Initial XML conversion
+        console.log("parsedTest",fullText)
         const initialResult = await processTextWithOpenRouter(fullText, process.env.OPENROUTER_API_KEY, "initial");
-        console.log("Initial XML conversion complete");
-        
-        // Secondary processing to refine and structure the XML
+        console.log("Initial XML    : "+initialResult)
         const refinedResult = await processTextWithOpenRouter(initialResult.xml, process.env.OPENROUTER_API_KEY, "refine");
-        console.log("XML refinement complete");
-        console.log(refinedResult)
-        // Save the conversion in the database
+        console.log("Refind XML    : "+refinedResult)
         const newConversion = await conversionModel.create({
-            userId: req.id,
+            userId,
             pdfLink: publicUrl,
-            xmlContent: refinedResult.xml, // Use the refined XML
+            xmlContent: refinedResult.xml,
             originalFilename: sanitizedName,
             pdfPages: noOfPages
         });
@@ -222,174 +146,84 @@ export const createConversion = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Full error:', error);
+        console.error('Conversion error:', error);
         return res.status(500).json({ 
             success: false,
             error: 'File upload failed',
-            details: {
-                message: error.message,
-                code: error.$metadata?.httpStatusCode,
-                awsError: error.name
-            }
+            details: error.message
         });
     }
 };
 
-export const getAllConversions=async(req,res)=>{
+export const getAllConversions = async (req, res) => {
     try {
-        const userId=req.id;
-        const userExists=await UserModel.findById(userId);
-        if(!userExists){
-            res.status(400).json({
-                success:false,
-                message:"User Not Found"
-            })
-        }
+        const userId = req.id;
+        const userExists = await UserModel.findById(userId);
+        if (!userExists) return res.status(400).json({ success: false, message: "User Not Found" });
 
         const conversions = await conversionModel.find({ userId });
-
         return res.status(200).json({
             message: conversions.length > 0 
                 ? "Successfully fetched all conversions" 
                 : "No conversions found for this user",
-            conversions: conversions,
+            conversions,
             success: true
         });
     } catch (error) {
-        console.log(error)
-        return res.status(400).json({
-         message:error.message,
-         success:false
-        
-        })
+        console.log(error);
+        return res.status(400).json({ message: error.message, success: false });
     }
-}
+};
 
 export const getConversionById = async (req, res) => {
     try {
         const { conversionId } = req.params;
         const userId = req.id;
 
-        // Check if conversionId is provided
-        if (!conversionId) {
-            return res.status(400).json({
-                success: false,
-                message: "Conversion ID is required",
-            });
-        }
-
-        // Validate if userId exists
+        if (!conversionId) return res.status(400).json({ success: false, message: "Conversion ID required" });
+        
         const userExists = await UserModel.findById(userId);
-        if (!userExists) {
-            return res.status(404).json({  // 404 = Not Found
-                success: false,
-                message: "User not found",
-            });
-        }
+        if (!userExists) return res.status(404).json({ success: false, message: "User not found" });
 
-        // Check if conversion exists
         const conversion = await conversionModel.findById(conversionId);
-        if (!conversion) {
-            return res.status(404).json({
-                success: false,
-                message: "Conversion not found",
-            });
-        }
-
-        // Optional: Ensure the conversion belongs to the user
+        if (!conversion) return res.status(404).json({ success: false, message: "Conversion not found" });
         if (conversion.userId.toString() !== userId.toString()) {
-            return res.status(403).json({  // 403 = Forbidden
-                success: false,
-                message: "Unauthorized access to this conversion",
-            });
+            return res.status(403).json({ success: false, message: "Unauthorized access" });
         }
 
-        return res.status(200).json({
-            success: true,
-            conversion,
-            message: "Successfully fetched conversion",
-        });
-
+        return res.status(200).json({ success: true, conversion, message: "Successfully fetched conversion" });
     } catch (error) {
         console.error("Error in getConversionById:", error);
-
-        // Handle invalid ObjectId errors (e.g., malformed conversionId)
         if (error.name === "CastError") {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid Conversion ID format",
-            });
+            return res.status(400).json({ success: false, message: "Invalid Conversion ID format" });
         }
-
-        // Generic error response (avoid exposing internal errors in production)
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error while fetching conversion",
-        });
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };
+
 export const removeConversionById = async (req, res) => {
     try {
         const { conversionId } = req.params;
         const userId = req.id;
 
-        // 1. Validate inputs
-        if (!conversionId) {
-            return res.status(400).json({
-                success: false,
-                message: "Conversion ID is required",
-            });
-        }
-
-        // 2. Verify user exists
-        const userExists = await UserModel.findById(userId);
-        if (!userExists) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found",
-            });
-        }
-
-        // 3. Find conversion and verify ownership
-        const conversion = await conversionModel.findById(conversionId);
+        if (!conversionId) return res.status(400).json({ success: false, message: "Conversion ID required" });
         
-        if (!conversion) {
-            return res.status(404).json({
-                success: false,
-                message: "Conversion not found",
-            });
-        }
+        const userExists = await UserModel.findById(userId);
+        if (!userExists) return res.status(404).json({ success: false, message: "User not found" });
 
-        // 4. Ownership check (critical security)
+        const conversion = await conversionModel.findById(conversionId);
+        if (!conversion) return res.status(404).json({ success: false, message: "Conversion not found" });
         if (conversion.userId.toString() !== userId.toString()) {
-            return res.status(403).json({ // 403 Forbidden
-                success: false,
-                message: "Unauthorized: You can only delete your own conversions",
-            });
+            return res.status(403).json({ success: false, message: "Unauthorized: Can only delete your own conversions" });
         }
 
-        // 5. Proceed with deletion
         await conversionModel.findByIdAndDelete(conversionId);
-
-        return res.status(200).json({
-            success: true,
-            message: "Conversion deleted successfully",
-        });
-
+        return res.status(200).json({ success: true, message: "Conversion deleted successfully" });
     } catch (error) {
         console.error("Delete conversion error:", error);
-        
-        // Handle invalid ObjectId format
         if (error.name === "CastError") {
-            return res.status(400).json({
-                success: false,
-                message: "Invalid Conversion ID format",
-            });
+            return res.status(400).json({ success: false, message: "Invalid Conversion ID format" });
         }
-
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error while deleting conversion",
-        });
+        return res.status(500).json({ success: false, message: "Internal server error" });
     }
 };

@@ -21,6 +21,9 @@ const conversionSchema = new mongoose.Schema({
     originalFilename: {
       type: String,
       required: true
+    },pdfPages:{
+      type:Number,
+    
     }
   });
   

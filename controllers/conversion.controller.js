@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import fetch from 'node-fetch';
 import pkg from 'pdfjs-dist';
 import { conversionModel } from '../models/conversion.model.js';
+import UserModel from '../models/user.model.js';
 const { getDocument } = pkg;
 
 // Load environment variables
@@ -50,7 +51,7 @@ async function processTextWithOpenRouter(text, apiKey, promptType = "initial") {
     if (promptType === "initial") {
         prompt = `Convert this to clean, well-formatted XML:\n${text}`;
     } else if (promptType === "refine") {
-        prompt = `generate Correct  completed code balance tag if the tag is not found and give only xml code as response nothing else:\n\n${text}`;
+        prompt = `remove content without any tag and give only xml code as response nothing else:\n\n${text}`;
     }
     
     try {
@@ -159,6 +160,17 @@ const s3Client = new S3Client({
 
 export const createConversion = async (req, res) => {
     try {
+
+
+        const userId=req.id;
+        const userExists=await UserModel.findById(userId);
+        if(!userExists){
+            res.status(400).json({
+                success:false,
+                message:"User Not Found"
+            })
+        }
+
         if (!req.files?.pdfFile) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
@@ -226,6 +238,165 @@ export const createConversion = async (req, res) => {
                 code: error.$metadata?.httpStatusCode,
                 awsError: error.name
             }
+        });
+    }
+};
+
+export const getAllConversions=async(req,res)=>{
+    try {
+        const userId=req.id;
+        const userExists=await UserModel.findById(userId);
+        if(!userExists){
+            res.status(400).json({
+                success:false,
+                message:"User Not Found"
+            })
+        }
+
+        const conversions = await conversionModel.find({ userId });
+
+        return res.status(200).json({
+            message: conversions.length > 0 
+                ? "Successfully fetched all conversions" 
+                : "No conversions found for this user",
+            conversions: conversions,
+            success: true
+        });
+    } catch (error) {
+        console.log(error)
+        return res.status(400).json({
+         message:error.message,
+         success:false
+        
+        })
+    }
+}
+
+export const getConversionById = async (req, res) => {
+    try {
+        const { conversionId } = req.params;
+        const userId = req.id;
+
+        // Check if conversionId is provided
+        if (!conversionId) {
+            return res.status(400).json({
+                success: false,
+                message: "Conversion ID is required",
+            });
+        }
+
+        // Validate if userId exists
+        const userExists = await UserModel.findById(userId);
+        if (!userExists) {
+            return res.status(404).json({  // 404 = Not Found
+                success: false,
+                message: "User not found",
+            });
+        }
+
+        // Check if conversion exists
+        const conversion = await conversionModel.findById(conversionId);
+        if (!conversion) {
+            return res.status(404).json({
+                success: false,
+                message: "Conversion not found",
+            });
+        }
+
+        // Optional: Ensure the conversion belongs to the user
+        if (conversion.userId.toString() !== userId.toString()) {
+            return res.status(403).json({  // 403 = Forbidden
+                success: false,
+                message: "Unauthorized access to this conversion",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            conversion,
+            message: "Successfully fetched conversion",
+        });
+
+    } catch (error) {
+        console.error("Error in getConversionById:", error);
+
+        // Handle invalid ObjectId errors (e.g., malformed conversionId)
+        if (error.name === "CastError") {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Conversion ID format",
+            });
+        }
+
+        // Generic error response (avoid exposing internal errors in production)
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error while fetching conversion",
+        });
+    }
+};
+export const removeConversionById = async (req, res) => {
+    try {
+        const { conversionId } = req.params;
+        const userId = req.id;
+
+        // 1. Validate inputs
+        if (!conversionId) {
+            return res.status(400).json({
+                success: false,
+                message: "Conversion ID is required",
+            });
+        }
+
+        // 2. Verify user exists
+        const userExists = await UserModel.findById(userId);
+        if (!userExists) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
+            });
+        }
+
+        // 3. Find conversion and verify ownership
+        const conversion = await conversionModel.findById(conversionId);
+        
+        if (!conversion) {
+            return res.status(404).json({
+                success: false,
+                message: "Conversion not found",
+            });
+        }
+
+        // 4. Ownership check (critical security)
+        if (conversion.userId.toString() !== userId.toString()) {
+            return res.status(403).json({ // 403 Forbidden
+                success: false,
+                message: "Unauthorized: You can only delete your own conversions",
+            });
+        }
+
+        // 5. Proceed with deletion
+        await conversionModel.findByIdAndDelete(conversionId);
+
+        return res.status(200).json({
+            success: true,
+            message: "Conversion deleted successfully",
+        });
+
+    } catch (error) {
+        console.error("Delete conversion error:", error);
+        
+        // Handle invalid ObjectId format
+        if (error.name === "CastError") {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid Conversion ID format",
+            });
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error while deleting conversion",
         });
     }
 };

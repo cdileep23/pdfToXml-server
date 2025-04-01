@@ -19,9 +19,14 @@ app.use(express.json())
 app.use(cookieParser())
 
 
+const allowedOrigin =
+    process.env.NODE_ENV === "production"
+        ? "https://pafto-xml-client.vercel.app"
+        : "http://localhost:5173"; // Use localhost in development
+
 app.use(cors({
-    origin: "http://localhost:5173",
-    credentials: true 
+    origin: allowedOrigin,
+    credentials: true
 }));
 
 app.get("/",(req,res)=>{

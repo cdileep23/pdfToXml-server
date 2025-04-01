@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 const MiddlewareAuth=async(req,res,next)=>{
     try {
         const token=req.cookies.token;
+        console.log("middle")
         console.log(token)
         if(!token){
             

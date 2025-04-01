@@ -17,6 +17,11 @@ const userSchema = new mongoose.Schema({
       type: String,
       required: true
     },
+    PhotoUrl:{
+      type:String,
+      default:"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQz68b1g8MSxSUqvFtuo44MvagkdFGoG7Z7DQ&s",
+     
+    },
     createdAt: {
       type: Date,
       default: Date.now

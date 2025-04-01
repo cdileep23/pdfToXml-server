@@ -9,17 +9,17 @@ const { getDocument } = pkg;
 
 dotenv.config();
 
-// Helper function to clean XML string
+
 function cleanXmlString(xmlString) {
     if (!xmlString) return '';
     
-    // Remove all text before <?xml
+ 
     const xmlStart = xmlString.indexOf('<?xml');
     if (xmlStart < 0) return xmlString;
     
     let cleaned = xmlString.slice(xmlStart);
     
-    // Remove any trailing text after the root element closes
+ 
     const rootClose = cleaned.lastIndexOf('</');
     if (rootClose > 0) {
         const endTag = cleaned.slice(rootClose).match(/<\/[^>]+>/);
@@ -32,7 +32,6 @@ function cleanXmlString(xmlString) {
     return cleaned;
 }
 
-// Parse PDF from URL using pdfjs
 const parsePdfFromUrl = async (url) => {
     try {
         const response = await fetch(url);
@@ -46,7 +45,7 @@ const parsePdfFromUrl = async (url) => {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
-            fullText += pageText + '\n\n'; // Removed "Page X:" prefix for cleaner XML
+            fullText += pageText + '\n\n'; 
         }
         
         return { fullText, noOfPages: pdf.numPages };
@@ -56,12 +55,12 @@ const parsePdfFromUrl = async (url) => {
     }
 };
 
-// Process text with OpenRouter (single API call)
+
 async function processTextWithOpenRouter(text, apiKey) {
     const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
     
     const prompt = `
-    Convert the following PDF text content into clean, well-structured XML with these requirements:
+    Convert the following full PDF text content into clean, well-structured XML with these requirements:
     1. Create valid XML with proper nesting and hierarchy
     2. Include meaningful tags that reflect the content structure
     3. Preserve all important content from the PDF
@@ -85,7 +84,7 @@ async function processTextWithOpenRouter(text, apiKey) {
                 model: "deepseek/deepseek-r1:free",
                 messages: [{ role: "user", content: prompt }],
                 temperature: 0.3,
-                max_tokens: 4096 // Adjust based on your expected XML size
+                max_tokens: 4096 
             }),
         });
 
@@ -107,7 +106,7 @@ async function processTextWithOpenRouter(text, apiKey) {
     }
 }
 
-// Configure S3 client
+
 const s3Client = new S3Client({
     region: process.env.AWS_REGION || 'us-east-1',
     credentials: {
@@ -116,7 +115,7 @@ const s3Client = new S3Client({
     }
 });
 
-// Controller for creating conversion
+
 export const createConversion = async (req, res) => {
     try {
         const userId = req.id;
@@ -148,14 +147,14 @@ export const createConversion = async (req, res) => {
         console.log(fullText)
         const result = await processTextWithOpenRouter(fullText, process.env.OPENROUTER_API_KEY);
         console.log(result.xml)
-        // Save to database
+      
         const newConversion = await conversionModel.create({
             userId,
             pdfLink: publicUrl,
             xmlContent: result.xml,
             originalFilename: sanitizedName,
             pdfPages: noOfPages,
-            processingMetadata: result.metadata // Store model usage info
+            processingMetadata: result.metadata 
         });
 
         return res.status(200).json({
@@ -174,7 +173,6 @@ export const createConversion = async (req, res) => {
     }
 };
 
-// Get all conversions for user
 export const getAllConversions = async (req, res) => {
     try {
         const userId = req.id;
@@ -195,7 +193,7 @@ export const getAllConversions = async (req, res) => {
     }
 };
 
-// Get single conversion by ID
+
 export const getConversionById = async (req, res) => {
     try {
         const { conversionId } = req.params;
@@ -222,7 +220,7 @@ export const getConversionById = async (req, res) => {
     }
 };
 
-// Delete conversion
+
 export const removeConversionById = async (req, res) => {
     try {
         const { conversionId } = req.params;

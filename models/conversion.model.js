@@ -27,7 +27,7 @@ const conversionSchema = new mongoose.Schema({
     }
   });
   
-  // Indexes
+
   conversionSchema.index({ userId: 1 });  
   conversionSchema.index({ createdAt: -1 });  
 

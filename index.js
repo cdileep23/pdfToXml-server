@@ -12,7 +12,7 @@ dotenv.config({})
 
 
 const app=express();
-app.use(fileUpload()); // This enables file handling
+app.use(fileUpload()); 
 app.use(express.urlencoded({ extended: true }));
 
 app.use(express.json())

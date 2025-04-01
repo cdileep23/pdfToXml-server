@@ -178,8 +178,7 @@ export const updateProfile = async (req, res) => {
   try {
     const userId = req.id;
     const { name } = req.body;
-    
-    // Find the user
+  
     const user = await UserModel.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -187,15 +186,14 @@ export const updateProfile = async (req, res) => {
         message: "User not found"
       });
     }
-    
-    // Update name if provided
+   
     if (name) {
       user.name = name;
     }
     
-    // Handle photo upload
+
     if (req.files && req.files.photo) {
-      // Delete old photo if it exists and isn't default
+  
       if (user.PhotoUrl && !user.PhotoUrl.includes('encrypted-tbn0.gstatic.com')) {
         try {
           const oldPhotoKey = user.PhotoUrl.split('.com/')[1];
@@ -212,11 +210,11 @@ export const updateProfile = async (req, res) => {
       const sanitizedName = uploadedPhoto.name.replace(/[^a-zA-Z0-9._-]/g, '-');
       const fileName = `user-photos/${uuidv4()}-${sanitizedName}`;
       
-      // Upload to S3
+      
       await s3Client.send(new PutObjectCommand({
         Bucket: process.env.S3_BUCKET_NAME,
         Key: fileName,
-        Body: uploadedPhoto.data, // Use .data for the buffer when not using multer
+        Body: uploadedPhoto.data, 
         ContentType: uploadedPhoto.mimetype,
         ACL: 'public-read'
       }));
@@ -224,11 +222,11 @@ export const updateProfile = async (req, res) => {
       user.PhotoUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
     }
     
-    // Save the updated user
+ 
     await user.save();
     console.log(user)
     
-    // Return the updated user (excluding password)
+    
     const updatedUser = await UserModel.findById(userId).select('-password');
     
     return res.status(200).json({

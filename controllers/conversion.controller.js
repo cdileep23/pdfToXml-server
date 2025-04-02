@@ -119,6 +119,15 @@ const s3Client = new S3Client({
 export const createConversion = async (req, res) => {
     try {
         const userId = req.id;
+        const io = req.app.get('io');
+        
+      
+        io.to(userId).emit("send_update", { 
+            message: "File received and validation started", 
+            percentage: 10 
+        });
+
+       
         const userExists = await UserModel.findById(userId);
         if (!userExists) return res.status(400).json({ success: false, message: "User Not Found" });
         if (!req.files?.pdfFile) return res.status(400).json({ error: 'No file uploaded' });
@@ -128,7 +137,12 @@ export const createConversion = async (req, res) => {
             return res.status(400).json({ error: 'Only PDF files are allowed' });
         }
 
-       
+      
+        io.to(userId).emit("send_update", { 
+            message: "PDF validated, uploading to storage", 
+            percentage: 20 
+        });
+
         const sanitizedName = pdfFile.name.replace(/[^a-zA-Z0-9._-]/g, '-');
         const fileName = `conversions/${uuidv4()}-${sanitizedName}`;
     
@@ -140,14 +154,26 @@ export const createConversion = async (req, res) => {
             ACL: 'public-read'
         }));
 
+        io.to(userId).emit("send_update", { 
+            message: "PDF uploaded to storage, starting parsing", 
+            percentage: 40 
+        });
+
         const publicUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
         const { fullText, noOfPages } = await parsePdfFromUrl(publicUrl);
         
-        console.log(publicUrl)
-        console.log(fullText)
+        io.to(userId).emit("send_update", { 
+            message: "PDF parsed, processing with AI", 
+            percentage: 60 
+        });
+
         const result = await processTextWithOpenRouter(fullText, process.env.OPENROUTER_API_KEY);
-        console.log(result.xml)
-      
+        
+        io.to(userId).emit("send_update", { 
+            message: "AI processing complete, finalizing conversion", 
+            percentage: 90 
+        });
+
         const newConversion = await conversionModel.create({
             userId,
             pdfLink: publicUrl,
@@ -155,6 +181,11 @@ export const createConversion = async (req, res) => {
             originalFilename: sanitizedName,
             pdfPages: noOfPages,
             processingMetadata: result.metadata 
+        });
+
+        io.to(userId).emit("conversion_completed", { 
+            message: "Conversion completed successfully!", 
+            percentage: 100 
         });
 
         return res.status(200).json({
@@ -165,6 +196,10 @@ export const createConversion = async (req, res) => {
 
     } catch (error) {
         console.error('Conversion error:', error);
+        io.to(userId).emit("conversion_error", { 
+            message: "Conversion failed: " + error.message, 
+            percentage: 0 
+        });
         return res.status(500).json({ 
             success: false,
             error: 'File processing failed',

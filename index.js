@@ -7,11 +7,42 @@ import conversionRouter from "./routes/conversion.route.js"
 import  cors from "cors"
 import fileUpload from 'express-fileupload'; 
 
-
+import http from "http"
+import { Server } from "socket.io";
 dotenv.config({})
 
 
-const app=express();
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST']
+  }
+});
+
+io.on('connection', (socket) => {
+  console.log('New connection:', socket.id);
+
+  // Listen for join-room event from client
+  socket.on('join-room', (userId) => {
+    // Add socket to a room named after the user ID
+    socket.join(userId);
+    console.log(`Socket ${socket.id} joined room ${userId}`);
+    
+    // You can now emit to this specific user with:
+    // io.to(userId).emit('event', data);
+  });
+
+  // Handle disconnection
+  socket.on('disconnect', () => {
+    console.log('User disconnected:', socket.id);
+  });
+});
+
+
+app.set('io', io)
+
 app.use(fileUpload()); 
 app.use(express.urlencoded({ extended: true }));
 
@@ -35,7 +66,7 @@ app.get("/",(req,res)=>{
 app.use('/user',userRouter)
 
 app.use('/conversion',conversionRouter)
-app.listen(process.env.PORT,()=>{
+server.listen(process.env.PORT,()=>{
     connectDB();
     console.log(`Server started At ${process.env.PORT}`)
 })

@@ -24,17 +24,15 @@ const io = new Server(server, {
 io.on('connection', (socket) => {
   console.log('New connection:', socket.id);
 
-  // Listen for join-room event from client
+  
   socket.on('join-room', (userId) => {
-    // Add socket to a room named after the user ID
+  
     socket.join(userId);
     console.log(`Socket ${socket.id} joined room ${userId}`);
-    
-    // You can now emit to this specific user with:
-    // io.to(userId).emit('event', data);
+   
   });
 
-  // Handle disconnection
+ 
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
   });

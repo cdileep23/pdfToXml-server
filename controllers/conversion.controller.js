@@ -67,6 +67,8 @@ async function processTextWithOpenRouter(text, apiKey) {
     4. Remove any headers/footers/page numbers if present
     5. Output ONLY the raw XML with no additional text or explanations
     6. Ensure proper XML declaration and root element
+    7. if table is there for that also
+  
     
     PDF Content:
     ${text}
@@ -161,6 +163,7 @@ export const createConversion = async (req, res) => {
 
         const publicUrl = `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
         const { fullText, noOfPages } = await parsePdfFromUrl(publicUrl);
+        console.log(fullText)
         
         io.to(userId).emit("send_update", { 
             message: "PDF parsed, processing with AI", 
@@ -168,7 +171,7 @@ export const createConversion = async (req, res) => {
         });
 
         const result = await processTextWithOpenRouter(fullText, process.env.OPENROUTER_API_KEY);
-        
+        console.log(result)
         io.to(userId).emit("send_update", { 
             message: "AI processing complete, finalizing conversion", 
             percentage: 90 
@@ -196,10 +199,7 @@ export const createConversion = async (req, res) => {
 
     } catch (error) {
         console.error('Conversion error:', error);
-        io.to(userId).emit("conversion_error", { 
-            message: "Conversion failed: " + error.message, 
-            percentage: 0 
-        });
+       
         return res.status(500).json({ 
             success: false,
             error: 'File processing failed',
